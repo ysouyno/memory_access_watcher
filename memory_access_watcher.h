@@ -16,6 +16,8 @@ public:
 		m_single_step(0)
 	{
 		m_p_this = this;
+
+		InitializeCriticalSection(&m_cs);
 	}
 
 	~memory_access_watcher()
@@ -24,6 +26,8 @@ public:
 		{
 			RemoveVectoredExceptionHandler(m_exception_handler);
 		}
+
+		DeleteCriticalSection(&m_cs);
 	}
 
 	BOOL init(const PVOID address, const SIZE_T length, DWORD new_protect)
@@ -73,10 +77,14 @@ private:
 
 			if (exception_address >= (DWORD *)m_address && exception_address < (DWORD *)m_address + m_length)
 			{
+				EnterCriticalSection(&m_cs);
+
 				BOOL ret = VirtualProtectEx(GetCurrentProcess(), m_address, m_length, m_old_protect, &old_protect);
 				if (!ret)
 				{
 					printf("VirtualProtectEx failed, error: %d\n", GetLastError());
+					LeaveCriticalSection(&m_cs);
+
 					return EXCEPTION_CONTINUE_EXECUTION;
 				}
 
@@ -90,6 +98,8 @@ private:
 					m_write_access = FALSE;
 					m_single_step = 1;
 				}
+
+				LeaveCriticalSection(&m_cs);
 			}
 
 			if (m_single_step)
@@ -105,14 +115,20 @@ private:
 			{
 				call_back(m_address, m_write_access);
 
+				EnterCriticalSection(&m_cs);
+
 				BOOL ret = VirtualProtectEx(GetCurrentProcess(), m_address, m_length, m_new_protect, &m_old_protect);
 				if (!ret)
 				{
 					printf("VirtualProtectEx failed, error: %d\n", GetLastError());
+					LeaveCriticalSection(&m_cs);
+
 					return EXCEPTION_CONTINUE_EXECUTION;
 				}
 
 				m_single_step = 0;
+
+				LeaveCriticalSection(&m_cs);
 			}
 
 			return EXCEPTION_CONTINUE_EXECUTION;
@@ -149,6 +165,7 @@ private:
 	DWORD m_new_protect;
 	BOOL m_write_access;
 	DWORD m_single_step;
+	CRITICAL_SECTION m_cs;
 
 	static memory_access_watcher *m_p_this;
 };
